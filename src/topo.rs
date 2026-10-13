@@ -60,7 +60,9 @@ pub fn build(snaps: &[Option<&Snapshot>], config: &Config) -> Topology {
             let entry = seen.entry(key).or_default();
             // The listening side is the one on the lower port; the other end
             // is an ephemeral port picked by the client.
-            if c.remote_port < c.local_port {
+            // Equal ports (syncthing dials 22000 from 22000) fall back to
+            // the address order, so both ends agree on who is the client.
+            if (c.remote_port, c.remote) < (c.local_port, c.local) {
                 entry.port = c.remote_port;
                 entry.client = Some((h, c.process.clone(), c.uid));
                 entry.server.get_or_insert((peer, None));
@@ -148,6 +150,19 @@ mod tests {
         let l = &t.links[0];
         assert_eq!((l.client, l.server, l.port, l.kind.as_str()), (0, 1, 22, "ssh"));
         assert_eq!(l.client_process.as_deref(), Some("ssh"));
+    }
+
+    #[test]
+    fn equal_ports_never_make_a_self_link() {
+        let (g, e) = ("100.114.32.78", "100.109.196.64");
+        let snaps = [
+            snap(g, vec![conn((g, 22000), (e, 22000), None, None)]),
+            snap(e, vec![conn((e, 22000), (g, 22000), None, None)]),
+        ];
+        let t = build(&[Some(&snaps[0]), Some(&snaps[1])], &Config::default());
+        assert_eq!(t.links.len(), 1);
+        assert_ne!(t.links[0].client, t.links[0].server);
+        assert_eq!(t.links[0].kind, "syncthing");
     }
 
     #[test]
