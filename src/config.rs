@@ -15,6 +15,26 @@ pub struct Config {
     pub activity: Vec<Rule>,
     /// Labels for server ports in the graph, e.g. `"22000" = "syncthing"`.
     pub ports: BTreeMap<String, String>,
+    /// Claude Code and Codex accounts whose plan usage to show. Empty means
+    /// the default `~/.claude` and `~/.codex`.
+    pub usage: Vec<Account>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Account {
+    /// Shown in the TUI, defaults to the dir name.
+    pub name: Option<String>,
+    pub kind: AccountKind,
+    /// `CLAUDE_CONFIG_DIR` or `CODEX_HOME` of the account.
+    pub dir: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AccountKind {
+    Claude,
+    Codex,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -56,7 +76,14 @@ fn default_command() -> String {
 
 impl Default for Config {
     fn default() -> Self {
-        Self { interval: 1.0, history: 120, hosts: Vec::new(), activity: default_rules(), ports: BTreeMap::new() }
+        Self {
+            interval: 1.0,
+            history: 120,
+            hosts: Vec::new(),
+            activity: default_rules(),
+            ports: BTreeMap::new(),
+            usage: Vec::new(),
+        }
     }
 }
 

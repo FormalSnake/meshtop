@@ -5,11 +5,12 @@ mod model;
 mod source;
 mod topo;
 mod ui;
+mod usage;
 
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -112,19 +113,24 @@ fn tui(config: config::Config) -> Result<()> {
             source::spawn_remote(i, h.cfg.clone(), interval, tx.clone(), children.clone());
         }
     }
+    let accounts = usage::accounts(&config.usage);
+    usage::spawn(accounts.clone(), tx.clone());
     drop(tx);
 
-    let mut app = App::new(config, hosts);
+    let mut app = App::new(config, hosts, accounts);
     let mut terminal = ratatui::init();
     execute!(std::io::stdout(), EnableMouseCapture)?;
     let result = (|| -> Result<()> {
+        let mut last = Instant::now();
         loop {
             while let Ok(update) = rx.try_recv() {
                 app.apply(update);
             }
-            app.frame += 1;
+            let now = Instant::now();
+            app.tick((now - last).as_secs_f64());
+            last = now;
             terminal.draw(|f| ui::draw(f, &app))?;
-            if event::poll(Duration::from_millis(80))? {
+            if event::poll(Duration::from_millis(33))? {
                 match event::read()? {
                     Event::Key(key) if key.kind == KeyEventKind::Press && app.key(key) => return Ok(()),
                     Event::Mouse(m) => app.mouse(m),

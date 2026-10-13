@@ -14,6 +14,8 @@ const RETRY: Duration = Duration::from_secs(3);
 pub enum Update {
     Snapshot(usize, Box<Snapshot>),
     Down(usize, String),
+    /// A plan usage reading for account `n`; `None` while signed out.
+    Usage(usize, Option<Result<Box<crate::usage::Usage>, String>>),
 }
 
 /// Running ssh children, killed on exit so no agent outlives the TUI.

@@ -76,6 +76,29 @@ let
       };
     };
   };
+
+  account = lib.types.submodule {
+    options = {
+      kind = lib.mkOption {
+        type = lib.types.enum [
+          "claude"
+          "codex"
+        ];
+        description = "Claude Code or Codex.";
+      };
+      name = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "Shown in the TUI. Defaults to the dir name, or the kind.";
+      };
+      dir = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "~/.claude-work";
+        description = "The account's `CLAUDE_CONFIG_DIR` or `CODEX_HOME`. Defaults to `~/.claude` or `~/.codex`.";
+      };
+    };
+  };
 in
 {
   options.programs.meshtop = {
@@ -142,6 +165,23 @@ in
       };
       description = "Labels for server ports in the map, on top of the built-in ones.";
     };
+
+    usage = lib.mkOption {
+      type = lib.types.listOf account;
+      default = [ ];
+      example = lib.literalExpression ''
+        [
+          { kind = "claude"; name = "personal"; }
+          { kind = "claude"; name = "work"; dir = "~/.claude-work"; }
+          { kind = "codex"; }
+        ]
+      '';
+      description = ''
+        Claude Code and Codex accounts whose plan usage the agents view
+        shows, read on the machine the TUI runs on. Empty watches `~/.claude`
+        and `~/.codex`. An account only shows while it is signed in.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -151,6 +191,7 @@ in
       clean {
         inherit (cfg) interval history ports;
         hosts = map clean cfg.hosts;
+        usage = map clean cfg.usage;
         activity = if cfg.activity == null then null else map clean cfg.activity;
       }
     );

@@ -1,7 +1,10 @@
 mod agents;
 mod detail;
 mod map;
+
+pub use map::floor_angle;
 mod overview;
+mod usage;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -119,6 +122,15 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
         View::Host => {
             &[("←→", "host"), ("↑↓", "scroll"), ("s", "sort"), ("esc", "back"), ("p", "pause"), ("q", "quit")]
         }
+        View::Map => &[
+            ("drag", "turn"),
+            ("↑↓", "tilt"),
+            ("wheel", "zoom"),
+            ("r", "spin"),
+            ("←→", "host"),
+            ("enter", "details"),
+            ("q", "quit"),
+        ],
         View::Agents => &[("↑↓", "scroll"), ("click", "host"), ("tab", "view"), ("p", "pause"), ("q", "quit")],
         _ => &[("←→", "host"), ("enter", "details"), ("tab", "view"), ("p", "pause"), ("q", "quit")],
     };

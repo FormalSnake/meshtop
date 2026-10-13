@@ -1,5 +1,5 @@
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Rect};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Cell, Row, Table};
@@ -46,7 +46,7 @@ pub fn collect(app: &App) -> Vec<(usize, &Agent)> {
 }
 
 /// `/Users/me/Developer/app` → `app`; the project is what tells sessions apart.
-fn project(cwd: &str) -> String {
+pub fn project(cwd: &str) -> String {
     let parts: Vec<&str> = cwd.trim_end_matches('/').rsplit('/').take(2).collect();
     match parts.as_slice() {
         [last, parent] if matches!(*parent, "apps" | "packages" | "crates" | "nix") => format!("{parent}/{last}"),
@@ -55,7 +55,7 @@ fn project(cwd: &str) -> String {
     }
 }
 
-fn title(a: &Agent) -> String {
+pub fn title(a: &Agent) -> String {
     match (&a.name, &a.title) {
         (Some(n), Some(t)) => format!("{n}: {t}"),
         (Some(n), None) => n.clone(),
@@ -64,8 +64,17 @@ fn title(a: &Agent) -> String {
     }
 }
 
-/// The agents view: one row per agent, with the resources it is using.
+/// The agents view: plan usage of each signed-in account, then one row per
+/// agent, with the resources it is using.
 pub fn draw_view(f: &mut Frame, area: Rect, app: &App) {
+    let accounts = super::usage::visible(app).len() as u16;
+    let area = if accounts > 0 {
+        let [top, rest] = Layout::vertical([Constraint::Length(accounts + 2), Constraint::Min(0)]).areas(area);
+        super::usage::draw(f, top, app);
+        rest
+    } else {
+        area
+    };
     let agents = collect(app);
     let visible = area.height.saturating_sub(3) as usize;
     let scroll = app.scroll.min(agents.len().saturating_sub(visible));
