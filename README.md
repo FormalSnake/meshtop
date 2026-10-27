@@ -183,6 +183,10 @@ on its own: the delivery goes to `unknown` until `deliver resume ID
 stay; `worktrees clean --dry-run` lists what `clean` would remove (clean,
 integrated, idle, unowned, never forced, branch kept).
 
+`skills update` pulls the registry (fast-forward only), syncs every skill
+target and rewrites the memory views Claude and Codex load. It never adopts
+foreign entries or overwrites edited copies, so a timer can run it.
+
 `meshtop serve` puts all of this in a browser at `127.0.0.1:7314`. Listening
 anywhere but loopback needs the token from `meshtop serve --token`.
 

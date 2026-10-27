@@ -254,6 +254,9 @@ pub enum SkillsCmd {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Pull the registry (fast-forward only), sync every target and rewrite the
+    /// memory views. What a timer runs: it never adopts or overwrites edits.
+    Update,
     /// Find backups and plugin duplicates in discovery; `--fix` moves them out.
     Doctor {
         #[arg(long)]
@@ -331,6 +334,16 @@ pub fn skills_cmd(cmd: SkillsCmd) -> Result<i32> {
         SkillsCmd::Sync { target, adopt, force, dry_run } => {
             let g = skills::sync(&reg, target.as_deref(), &skills::SyncOptions { adopt, force, dry_run })?;
             print_generation(&g, dry_run);
+        }
+        SkillsCmd::Update => {
+            let out = Command::new("git").arg("-C").arg(&reg.root).args(["pull", "--ff-only", "-q"]).output()?;
+            if !out.status.success() {
+                bail!("git pull in {} failed: {}", reg.root.display(), String::from_utf8_lossy(&out.stderr).trim());
+            }
+            let reg = Registry::open(None)?;
+            let g = skills::sync(&reg, None, &skills::SyncOptions { adopt: false, force: false, dry_run: false })?;
+            print_generation(&g, false);
+            export_views(&reg)?;
         }
         SkillsCmd::Doctor { fix, dry_run } => {
             if fix {
