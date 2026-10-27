@@ -188,7 +188,14 @@ target and rewrites the memory views Claude and Codex load. It never adopts
 foreign entries or overwrites edited copies, so a timer can run it.
 
 `meshtop serve` puts all of this in a browser at `127.0.0.1:7314`. Listening
-anywhere but loopback needs the token from `meshtop serve --token`.
+anywhere but loopback needs the token from `meshtop serve --token`. Behind a
+reverse proxy that does its own access control, stay on loopback and name the
+proxy's host instead:
+
+```
+meshtop serve --allow-host mac.tailnet.ts.net
+tailscale serve --bg --https=8314 http://127.0.0.1:7314
+```
 
 ## Config
 

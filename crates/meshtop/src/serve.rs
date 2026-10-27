@@ -24,6 +24,10 @@ pub struct ServeArgs {
     /// Print the access token and exit.
     #[arg(long)]
     token: bool,
+    /// Another Host name to answer on loopback, for a reverse proxy such as
+    /// Tailscale Serve whose own access control stands in for the token.
+    #[arg(long = "allow-host", value_name = "HOST")]
+    allow_hosts: Vec<String>,
 }
 
 const INDEX: &str = include_str!("../web/index.html");
@@ -61,7 +65,7 @@ pub fn run(a: ServeArgs) -> Result<i32> {
             std::thread::sleep(Duration::from_secs(60));
         }
     });
-    let ctx = std::sync::Arc::new(Ctx { token, loopback, listen: a.listen });
+    let ctx = std::sync::Arc::new(Ctx { token, loopback, listen: a.listen, allow_hosts: a.allow_hosts });
     for req in server.incoming_requests() {
         let ctx = ctx.clone();
         std::thread::spawn(move || handle(&ctx, req));
@@ -73,6 +77,7 @@ struct Ctx {
     token: String,
     loopback: bool,
     listen: SocketAddr,
+    allow_hosts: Vec<String>,
 }
 
 fn header<'a>(req: &'a Request, name: &'static str) -> Option<&'a str> {
@@ -97,7 +102,7 @@ fn reply_json(req: Request, status: u16, v: &Value) {
 fn allowed(ctx: &Ctx, req: &Request) -> Result<Option<String>, &'static str> {
     let host = header(req, "Host").unwrap_or("");
     let host_name = host.rsplit_once(':').map_or(host, |(h, _)| h).trim_matches(['[', ']']);
-    let local_name = matches!(host_name, "localhost" | "127.0.0.1" | "::1");
+    let local_name = matches!(host_name, "localhost" | "127.0.0.1" | "::1") || ctx.allow_hosts.iter().any(|h| h.eq_ignore_ascii_case(host_name));
     if ctx.loopback && !local_name {
         return Err("unexpected Host header");
     }
