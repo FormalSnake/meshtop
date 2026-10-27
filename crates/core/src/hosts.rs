@@ -494,7 +494,7 @@ pub fn record(name: &str, obs: Observation) -> Result<Cached> {
 /// is none. Callers asking at once share one probe: the first takes the
 /// host's lock and probes, the rest wait on the lock and read its result.
 pub fn observe_with(name: &str, max_age: Duration, probe: &dyn Fn() -> Observation) -> Result<Cached> {
-    let fresh = |c: &Cached| c.latest.as_ref().is_some_and(|o| paths::now_ms().saturating_sub(o.at) <= max_age.as_millis() as u64);
+    let fresh = |c: &Cached| c.latest.as_ref().is_some_and(|o| paths::now_ms().saturating_sub(o.at) < max_age.as_millis() as u64);
     let c = cached(name);
     if fresh(&c) {
         return Ok(c);
@@ -523,7 +523,7 @@ pub fn status_from(name: &str, def: &HostDef, c: &Cached, max_age: Duration, hol
     let now = paths::now_ms();
     let latest = c.latest.as_ref();
     let age = latest.map(|o| now.saturating_sub(o.at));
-    let fresh = age.is_some_and(|a| a <= max_age.as_millis() as u64);
+    let fresh = age.is_some_and(|a| a < max_age.as_millis() as u64);
     let ready = fresh && latest.is_some_and(|o| o.reach == Reach::Ready);
     let os = if ready { latest.and_then(|o| o.os.clone()) } else { None };
     let mode = os.as_ref().and_then(|os| def.modes.iter().find(|m| &m.os == os));
