@@ -79,6 +79,80 @@ function table(head, rows, empty) {
 
 const state = (s, label = word(s)) => h("span", { class: "state " + s }, label);
 
+// ---- live ----------------------------------------------------------------
+
+// Live tabs mount once and then redraw from /api/live about once a second,
+// only while they are showing. live.js and map.js register into `live`: each
+// entry takes the hash argument and returns { el, update(data), host?, stop? }.
+const live = {};
+let liveView = null, liveTimer = 0;
+
+async function pollLive() {
+  clearTimeout(liveTimer);
+  const v = liveView;
+  if (!v) return;
+  if (document.visibilityState === "visible") {
+    try {
+      const d = await api("live" + (v.host ? "?host=" + encodeURIComponent(v.host) : ""));
+      if (v === liveView) v.update(d);
+    } catch (e) {
+      if (v === liveView) toast("Live readings did not load: " + e.message, true);
+    }
+  }
+  if (v === liveView) liveTimer = setTimeout(pollLive, 1000);
+}
+
+const pct = (used, total) => (total ? Math.min(100, Math.round((used / total) * 100)) : 0);
+
+function bytes(n) {
+  const u = ["B", "K", "M", "G", "T"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (i && n < 10 ? n.toFixed(1) : Math.round(n)) + u[i];
+}
+const rate = (n) => bytes(n) + "/s";
+
+// Same order as the TUI: no green, yellow or red, which mean load.
+const HOST_COLORS = ["--cyan", "--magenta", "--blue", "--purple", "--orange", "--teal"];
+const hostColor = (i) => `var(${HOST_COLORS[i % HOST_COLORS.length]})`;
+const loadClass = (p) => (p >= 90 ? "hot" : p >= 75 ? "warm" : "");
+
+// A sparkline of the last samples, scaled to `max` (or the largest sample).
+function spark(values, max, cls = "") {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("class", "spark " + cls);
+  svg.setAttribute("viewBox", "0 0 100 24");
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("aria-hidden", "true");
+  const vs = values.slice(-60);
+  const top = max || Math.max(1, ...vs);
+  if (vs.length > 1) {
+    const pts = vs.map((v, i) => `${((i / (vs.length - 1)) * 100).toFixed(1)},${(23 - (Math.min(v, top) / top) * 22).toFixed(1)}`);
+    const area = document.createElementNS(ns, "polygon");
+    area.setAttribute("points", `0,24 ${pts.join(" ")} 100,24`);
+    const line = document.createElementNS(ns, "polyline");
+    line.setAttribute("points", pts.join(" "));
+    svg.append(area, line);
+  }
+  return svg;
+}
+
+// Agent states, most urgent first, as the TUI ranks them.
+const AGENT = {
+  blocked: { sym: "▲", label: "needs input", rank: 0 },
+  working: { sym: "●", label: "working", rank: 1 },
+  done: { sym: "✓", label: "done", rank: 2 },
+  idle: { sym: "○", label: "idle", rank: 3 },
+};
+const agentMeta = (s) => AGENT[s] || { sym: "?", label: "unknown", rank: 4 };
+
+function project(cwd) {
+  const p = (cwd || "").split("/").filter(Boolean);
+  const last = p.at(-1) || "";
+  return ["apps", "packages", "crates", "nix"].includes(p.at(-2)) ? p.at(-3) + "/" + last : last;
+}
+
 // ---- hosts ---------------------------------------------------------------
 
 const FRESH_MS = 30000;
@@ -248,7 +322,8 @@ const views = {
 let drawn = null, drawing = 0;
 
 async function draw() {
-  const name = location.hash.slice(1) in views ? location.hash.slice(1) : "deliveries";
+  const [key, arg] = location.hash.slice(1).split("/");
+  const name = key in views || key in live ? key : "overview";
   const nav = document.querySelector(".tabs");
   for (const a of nav.querySelectorAll("a")) {
     if (a.hash !== "#" + name) { a.removeAttribute("aria-current"); continue; }
@@ -259,6 +334,15 @@ async function draw() {
   }
   const main = document.getElementById("view");
   const seq = ++drawing;
+  liveView?.stop?.();
+  liveView = null;
+  if (name in live) {
+    liveView = live[name](arg && decodeURIComponent(arg));
+    drawn = name;
+    main.replaceChildren(liveView.el);
+    pollLive();
+    return;
+  }
   if (drawn !== name) main.replaceChildren(h("p", { class: "empty" }, `Loading ${name}…`));
   let nodes;
   try {
@@ -283,6 +367,7 @@ async function init() {
   await Promise.all([drawHosts(false), draw()]);
   // Hosts refresh on the probe cache's own cadence, and only while visible.
   setInterval(() => document.visibilityState === "visible" && drawHosts(false), FRESH_MS);
+  document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && pollLive());
   setInterval(() => {
     for (const bar of document.querySelectorAll(".age span")) {
       const m = /scaleX\(([\d.]+)\)/.exec(bar.style.transform);

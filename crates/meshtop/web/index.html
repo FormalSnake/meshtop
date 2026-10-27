@@ -5,8 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark light">
   <title>meshtop</title>
+  <meta name="theme-color" content="#100f0f" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#fffcf0" media="(prefers-color-scheme: light)">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="stylesheet" href="/app.css">
   <script src="/app.js" defer></script>
+  <script src="/live.js" defer></script>
+  <script src="/map.js" defer></script>
 </head>
 <body>
   <header class="top">
@@ -20,6 +26,9 @@
   </section>
 
   <nav class="tabs" aria-label="Sections">
+    <a href="#overview">Overview</a>
+    <a href="#map">Map</a>
+    <a href="#agents">Agents</a>
     <a href="#deliveries">Deliveries</a>
     <a href="#jobs">Jobs</a>
     <a href="#worktrees">Worktrees</a>

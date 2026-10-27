@@ -1,5 +1,6 @@
 mod app;
 mod deliver;
+mod live;
 mod manage;
 mod serve;
 mod ui;

@@ -33,6 +33,10 @@ pub struct ServeArgs {
 const INDEX: &str = include_str!("../web/index.html");
 const APP_JS: &str = include_str!("../web/app.js");
 const APP_CSS: &str = include_str!("../web/app.css");
+const LIVE_JS: &str = include_str!("../web/live.js");
+const MAP_JS: &str = include_str!("../web/map.js");
+const FAVICON: &str = include_str!("../web/favicon.svg");
+const TOUCH_ICON: &[u8] = include_bytes!("../web/apple-touch-icon.png");
 
 fn token() -> Result<String> {
     let path = paths::state().join("serve-token");
@@ -128,14 +132,18 @@ fn handle(ctx: &Ctx, mut req: Request) {
     let (path, query) = url.split_once('?').unwrap_or((&url, ""));
     let path = path.to_string();
     let q = |k: &str| query.split('&').find_map(|kv| kv.strip_prefix(&format!("{k}="))).map(|v| v.replace("%2F", "/").replace('+', " "));
-    let static_file = match path.as_str() {
-        "/" => Some(("text/html; charset=utf-8", INDEX)),
-        "/app.js" => Some(("text/javascript; charset=utf-8", APP_JS)),
-        "/app.css" => Some(("text/css; charset=utf-8", APP_CSS)),
+    let static_file: Option<(&str, &[u8])> = match path.as_str() {
+        "/" => Some(("text/html; charset=utf-8", INDEX.as_bytes())),
+        "/app.js" => Some(("text/javascript; charset=utf-8", APP_JS.as_bytes())),
+        "/app.css" => Some(("text/css; charset=utf-8", APP_CSS.as_bytes())),
+        "/live.js" => Some(("text/javascript; charset=utf-8", LIVE_JS.as_bytes())),
+        "/map.js" => Some(("text/javascript; charset=utf-8", MAP_JS.as_bytes())),
+        "/favicon.svg" => Some(("image/svg+xml", FAVICON.as_bytes())),
+        "/apple-touch-icon.png" => Some(("image/png", TOUCH_ICON)),
         _ => None,
     };
     if let Some((ctype, body)) = static_file {
-        let mut r = Response::from_string(body);
+        let mut r = Response::from_data(body);
         r.add_header(Header::from_bytes("Content-Type", ctype).expect("static header"));
         r.add_header(Header::from_bytes("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'").expect("static header"));
         if let Some(t) = set_cookie.filter(|t| *t == ctx.token) {
@@ -173,6 +181,7 @@ fn route(ctx: &Ctx, method: &Method, path: &str, q: &dyn Fn(&str) -> Option<Stri
             "state": paths::state(),
             "listen": ctx.listen.to_string(),
         }),
+        (Method::Get, ["api", "live"]) => crate::live::snapshot(q("host").as_deref())?,
         (Method::Get, ["api", "hosts"]) => {
             let file = hosts::load(&reg)?;
             let cached = q("cached").is_some();
