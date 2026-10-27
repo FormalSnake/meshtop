@@ -2,9 +2,13 @@
 //! as the CLI, against the same registry and state dir, so the two never
 //! disagree about a host, a job or a worktree.
 
-use std::io::Read;
+use std::collections::BTreeMap;
+use std::hash::{Hash, Hasher};
+use std::io::{Read, Write};
 use std::net::SocketAddr;
-use std::time::Duration;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use clap::Args;
@@ -69,6 +73,11 @@ pub fn run(a: ServeArgs) -> Result<i32> {
             std::thread::sleep(Duration::from_secs(60));
         }
     });
+    // The first page load would otherwise wait out a full worktree walk.
+    std::thread::spawn(|| {
+        let _ = worktrees_view(None, 24);
+        let _ = skills_view();
+    });
     let ctx = std::sync::Arc::new(Ctx { token, loopback, listen: a.listen, allow_hosts: a.allow_hosts });
     for req in server.incoming_requests() {
         let ctx = ctx.clone();
@@ -89,11 +98,91 @@ fn header<'a>(req: &'a Request, name: &'static str) -> Option<&'a str> {
 }
 
 fn reply(req: Request, status: u16, ctype: &str, body: Vec<u8>) {
+    send(req, status, &[("Content-Type", ctype), ("Cache-Control", "no-store"), ("X-Content-Type-Options", "nosniff"), ("Referrer-Policy", "no-referrer")], body);
+}
+
+/// Gzips anything worth it; over Tailscale from a phone the JSON for
+/// worktrees and skills is most of the wait.
+fn send(req: Request, status: u16, headers: &[(&str, &str)], body: Vec<u8>) {
+    let gzip = body.len() > 1024 && header(&req, "Accept-Encoding").is_some_and(|a| a.contains("gzip"));
+    let body = if gzip {
+        let mut enc = flate2::write::GzEncoder::new(Vec::with_capacity(body.len() / 4), flate2::Compression::fast());
+        let _ = enc.write_all(&body);
+        enc.finish().unwrap_or_default()
+    } else {
+        body
+    };
     let mut r = Response::from_data(body).with_status_code(status);
-    for (k, v) in [("Content-Type", ctype), ("Cache-Control", "no-store"), ("X-Content-Type-Options", "nosniff"), ("Referrer-Policy", "no-referrer")] {
+    for (k, v) in headers.iter().copied().chain(gzip.then_some(("Content-Encoding", "gzip"))).chain([("Vary", "Accept-Encoding")]) {
         r.add_header(Header::from_bytes(k, v).expect("static header"));
     }
     let _ = req.respond(r);
+}
+
+struct Entry {
+    at: Instant,
+    value: Value,
+    refreshing: bool,
+}
+
+static CACHE: Mutex<BTreeMap<String, Entry>> = Mutex::new(BTreeMap::new());
+/// Bumped by every write, so a refresh that started before it cannot put
+/// the old answer back.
+static GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Answers for the slow reads. Past `fresh` the old answer still goes out
+/// at once and a refresh runs behind it, so a page never waits on a scan it
+/// has seen before.
+fn cached(key: String, fresh: Duration, f: impl FnOnce() -> Result<Value> + Send + 'static) -> Result<Value> {
+    let generation = GENERATION.load(Ordering::SeqCst);
+    if let Some(e) = CACHE.lock().unwrap().get_mut(&key) {
+        if e.at.elapsed() > fresh && !e.refreshing {
+            e.refreshing = true;
+            let key = key.clone();
+            std::thread::spawn(move || store(key, generation, f()));
+        }
+        return Ok(e.value.clone());
+    }
+    let v = f()?;
+    store(key, generation, Ok(v.clone()));
+    Ok(v)
+}
+
+fn store(key: String, generation: u64, r: Result<Value>) {
+    let mut c = CACHE.lock().unwrap();
+    match r {
+        Ok(value) if GENERATION.load(Ordering::SeqCst) == generation => {
+            c.insert(key, Entry { at: Instant::now(), value, refreshing: false });
+        }
+        _ => {
+            if let Some(e) = c.get_mut(&key) {
+                e.refreshing = false;
+            }
+        }
+    }
+}
+
+fn invalidate() {
+    GENERATION.fetch_add(1, Ordering::SeqCst);
+    CACHE.lock().unwrap().clear();
+}
+
+fn worktrees_view(repo: Option<String>, min_idle_hours: u64) -> Result<Value> {
+    cached(format!("worktrees {repo:?} {min_idle_hours}"), Duration::from_secs(30), move || {
+        let (_, list) = scan(&repo, min_idle_hours);
+        Ok(json!({ "worktrees": list.into_iter().filter(|w| !w.main).collect::<Vec<_>>() }))
+    })
+}
+
+fn skills_view() -> Result<Value> {
+    cached("skills".into(), Duration::from_secs(30), || {
+        let reg = Registry::open(None)?;
+        let mut targets = Vec::new();
+        for t in &reg.manifest.targets {
+            targets.push(skills::target_status(&reg, t)?);
+        }
+        Ok(json!({ "catalog": skills::catalog(&reg)?, "targets": targets, "generations": skills::generations() }))
+    })
 }
 
 fn reply_json(req: Request, status: u16, v: &Value) {
@@ -143,15 +232,25 @@ fn handle(ctx: &Ctx, mut req: Request) {
         _ => None,
     };
     if let Some((ctype, body)) = static_file {
-        let mut r = Response::from_data(body);
-        r.add_header(Header::from_bytes("Content-Type", ctype).expect("static header"));
-        r.add_header(Header::from_bytes("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'").expect("static header"));
-        if let Some(t) = set_cookie.filter(|t| *t == ctx.token) {
-            let c = format!("meshtop={t}; HttpOnly; SameSite=Strict; Path=/");
-            r.add_header(Header::from_bytes("Set-Cookie", c.as_bytes()).expect("cookie header"));
+        // Embedded in the binary, so the hash only changes with a new build;
+        // revalidating costs a 304 instead of the whole file.
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        body.hash(&mut h);
+        let etag = format!("\"{:016x}\"", h.finish());
+        let cookie = set_cookie.filter(|t| *t == ctx.token).map(|t| format!("meshtop={t}; HttpOnly; SameSite=Strict; Path=/"));
+        let mut headers = vec![
+            ("Content-Type", ctype),
+            ("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'"),
+            ("Cache-Control", "no-cache"),
+            ("ETag", etag.as_str()),
+        ];
+        if let Some(c) = cookie.as_deref() {
+            headers.push(("Set-Cookie", c));
         }
-        let _ = req.respond(r);
-        return;
+        if cookie.is_none() && header(&req, "If-None-Match") == Some(etag.as_str()) {
+            return send(req, 304, &headers[2..], Vec::new());
+        }
+        return send(req, 200, &headers, body.to_vec());
     }
     let mut body = String::new();
     if *req.method() == Method::Post {
@@ -159,7 +258,11 @@ fn handle(ctx: &Ctx, mut req: Request) {
     }
     let input: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
     let method = req.method().clone();
-    match route(ctx, &method, &path, &q, &input) {
+    let result = route(ctx, &method, &path, &q, &input);
+    if method != Method::Get {
+        invalidate();
+    }
+    match result {
         Ok(v) => reply_json(req, 200, &v),
         Err(e) => reply_json(req, if e.to_string().starts_with("not found") { 404 } else { 400 }, &json!({ "error": format!("{e:#}") })),
     }
@@ -184,9 +287,12 @@ fn route(ctx: &Ctx, method: &Method, path: &str, q: &dyn Fn(&str) -> Option<Stri
         (Method::Get, ["api", "live"]) => crate::live::snapshot(q("host").as_deref())?,
         (Method::Get, ["api", "hosts"]) => {
             let file = hosts::load(&reg)?;
-            let cached = q("cached").is_some();
-            let st = hosts::status_all(&file, &[], Duration::from_secs(num("max_age", 30)), Duration::from_secs(8), cached);
-            json!({ "schema": HOSTS_SCHEMA, "at": paths::now_ms(), "hosts": st })
+            let only_cached = q("cached").is_some();
+            let max_age = num("max_age", 30);
+            cached(format!("hosts {max_age} {only_cached}"), Duration::from_secs(5), move || {
+                let st = hosts::status_all(&file, &[], Duration::from_secs(max_age), Duration::from_secs(8), only_cached);
+                Ok(json!({ "schema": HOSTS_SCHEMA, "at": paths::now_ms(), "hosts": st }))
+            })?
         }
         (Method::Post, ["api", "hosts", name, "hold"]) => {
             if !hosts::load(&reg)?.hosts.contains_key(*name) {
@@ -197,13 +303,7 @@ fn route(ctx: &Ctx, method: &Method, path: &str, q: &dyn Fn(&str) -> Option<Stri
             json!({ "held": name })
         }
         (Method::Post, ["api", "hosts", name, "release"]) => json!({ "released": hosts::release(name)? }),
-        (Method::Get, ["api", "skills"]) => {
-            let mut targets = Vec::new();
-            for t in &reg.manifest.targets {
-                targets.push(skills::target_status(&reg, t)?);
-            }
-            json!({ "catalog": skills::catalog(&reg)?, "targets": targets, "generations": skills::generations() })
-        }
+        (Method::Get, ["api", "skills"]) => skills_view()?,
         (Method::Get, ["api", "skills", name, "diff"]) => json!({ "diff": skills::diff(&reg, name, &q("target").unwrap_or_else(|| "claude".into()))? }),
         (Method::Post, ["api", "skills", "sync"]) => {
             let opts = skills::SyncOptions { dry_run: input.get("dry_run").and_then(Value::as_bool).unwrap_or(true), ..Default::default() };
@@ -243,16 +343,14 @@ fn route(ctx: &Ctx, method: &Method, path: &str, q: &dyn Fn(&str) -> Option<Stri
             let d = running_driver(id).with_context(|| format!("no driver is running for {id}"))?;
             json!(jobs::cancel(&d.id)?)
         }
-        (Method::Get, ["api", "services"]) => {
+        (Method::Get, ["api", "services"]) => cached("services".into(), Duration::from_secs(5), || {
+            let reg = Registry::open(None)?;
             let host = local_host(&reg);
-            json!({ "host": host, "services": services::here(&reg, &host).iter().map(services::status).collect::<Vec<_>>() })
-        }
+            Ok(json!({ "host": host, "services": services::here(&reg, &host).iter().map(services::status).collect::<Vec<_>>() }))
+        })?,
         (Method::Get, ["api", "services", name, "logs"]) => json!({ "log": services::logs(&reg, &local_host(&reg), name, num("lines", 200) as usize)? }),
         (Method::Post, ["api", "services", name, "restart"]) => json!(services::restart(&reg, &local_host(&reg), name)?),
-        (Method::Get, ["api", "worktrees"]) => {
-            let (_, list) = scan(&q("repo"), num("min_idle_hours", 24));
-            json!({ "worktrees": list.into_iter().filter(|w| !w.main).collect::<Vec<_>>() })
-        }
+        (Method::Get, ["api", "worktrees"]) => worktrees_view(q("repo"), num("min_idle_hours", 24))?,
         (Method::Post, ["api", "worktrees", "remove"]) => {
             let path = std::path::PathBuf::from(s(input, "path").context("path required")?);
             let (cx, list) = scan(&None, 24);

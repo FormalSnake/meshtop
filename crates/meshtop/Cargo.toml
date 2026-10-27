@@ -10,6 +10,7 @@ repository.workspace = true
 meshtop-core = { path = "../core" }
 anyhow.workspace = true
 clap.workspace = true
+flate2 = "1.1"
 jiff.workspace = true
 ratatui.workspace = true
 serde.workspace = true

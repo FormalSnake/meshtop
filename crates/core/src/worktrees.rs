@@ -255,7 +255,7 @@ fn inspect(repo: &Path, base: Option<&str>, raw: Raw, main: bool, cx: &Scan) -> 
             }
             w.last_activity = ["index", "HEAD", "logs/HEAD"].iter().map(|f| mtime_ms(&gd.join(f))).max().unwrap_or(0);
         }
-        if let Some(st) = git(&raw.path, &["status", "--porcelain", "--ignored", "--untracked-files=normal"]) {
+        if let Some(st) = git(&raw.path, &["status", "--porcelain", "--ignored=matching", "--untracked-files=normal"]) {
             for line in st.lines() {
                 match line.get(..2) {
                     Some("??") => w.untracked += 1,
