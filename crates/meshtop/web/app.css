@@ -1,0 +1,139 @@
+/* Flexoki, the palette the terminals and the TUI already use. */
+:root {
+  --bg: #100f0f;
+  --bg-2: #1c1b1a;
+  --ui: #282726;
+  --ui-2: #343331;
+  --tx: #cecdc3;
+  --tx-2: #878580;
+  --tx-3: #575653;
+  --green: #879a39;
+  --yellow: #d0a215;
+  --orange: #da702c;
+  --red: #d14d41;
+  --blue: #4385be;
+  --cyan: #3aa99f;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #fffcf0;
+    --bg-2: #f2f0e5;
+    --ui: #e6e4d9;
+    --ui-2: #dad8ce;
+    --tx: #100f0f;
+    --tx-2: #6f6e69;
+    --tx-3: #b7b5ac;
+    --green: #66800b;
+    --yellow: #ad8301;
+    --orange: #bc5215;
+    --red: #af3029;
+    --blue: #205ea6;
+    --cyan: #24837b;
+    color-scheme: light;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0 auto;
+  max-width: 1280px;
+  padding: 20px 24px 64px;
+  background: var(--bg);
+  color: var(--tx);
+  font: 14px/1.45 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+h1 { font-size: 18px; }
+h2 { font-size: 15px; }
+.mono, code, pre, td.mono { font-family: var(--mono); font-size: 12.5px; }
+.muted { color: var(--tx-2); font-weight: 400; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+
+.top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; margin-bottom: 16px; }
+.top p { margin: 0; }
+
+/* Hosts: what each machine is for (roles) stays apart from what it is
+   doing now (OS, reach, age), because only the second goes stale. */
+.hosts { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.host { background: var(--bg-2); border: 1px solid var(--ui); border-radius: 10px; padding: 14px 16px 12px; display: grid; gap: 8px; align-content: start; }
+.host-head { display: flex; align-items: center; gap: 8px; }
+.host-head h3 { font-size: 16px; font-family: var(--mono); }
+.host-desc { color: var(--tx-2); font-size: 13px; margin: 0; }
+.now { display: flex; align-items: baseline; gap: 8px; font-family: var(--mono); font-size: 13px; }
+.now strong { font-weight: 600; }
+.reach { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--tx-3); }
+.reach.ready { background: var(--green); }
+.reach.timeout, .reach.unreachable, .reach.ssh_refused { background: var(--yellow); }
+.reach.auth_failed, .reach.mismatch { background: var(--red); }
+.stale .now { color: var(--tx-2); }
+.age { height: 2px; background: var(--ui); border-radius: 1px; overflow: hidden; }
+.age span { display: block; height: 100%; background: var(--cyan); transform-origin: left; transition: transform 1s linear; }
+.tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.tag { font: 11.5px var(--mono); padding: 1px 6px; border-radius: 4px; background: var(--ui); color: var(--tx-2); }
+.tag.on { color: var(--tx); background: var(--ui-2); }
+.host .detail { font: 12px var(--mono); color: var(--tx-2); margin: 0; overflow-wrap: anywhere; }
+.host .hold { color: var(--orange); font-size: 13px; margin: 0; }
+.host-actions { display: flex; gap: 6px; }
+
+.tabs { display: flex; gap: 2px; margin: 24px 0 12px; border-bottom: 1px solid var(--ui); overflow-x: auto; }
+.tabs a { padding: 8px 12px; color: var(--tx-2); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+.tabs a:hover { color: var(--tx); }
+.tabs a[aria-current="page"] { color: var(--tx); border-bottom-color: var(--cyan); }
+
+main:focus { outline: none; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 10px; }
+.bar p { margin: 0; color: var(--tx-2); }
+.empty { color: var(--tx-2); padding: 24px 0; }
+
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; font-weight: 500; color: var(--tx-2); font-size: 12px; padding: 6px 10px; border-bottom: 1px solid var(--ui); white-space: nowrap; }
+td { padding: 7px 10px; border-bottom: 1px solid var(--bg-2); vertical-align: top; }
+tr:hover td { background: var(--bg-2); }
+td.why { color: var(--tx-2); font-size: 13px; max-width: 44ch; }
+td.num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+td.act { white-space: nowrap; text-align: right; }
+
+.state { font: 12px var(--mono); }
+.state.succeeded, .state.done, .state.current, .state.removable, .state.running-ok { color: var(--green); }
+.state.running, .state.starting, .state.building, .state.waiting_target, .state.installing, .state.review { color: var(--blue); }
+.state.failed, .state.blocked, .state.lost, .state.unknown, .state.stopped { color: var(--red); }
+.state.keep, .state.cancelled, .state.edited, .state.foreign { color: var(--yellow); }
+
+button {
+  font: inherit; font-size: 13px; color: var(--tx); background: var(--ui); border: 1px solid var(--ui-2);
+  border-radius: 6px; padding: 4px 10px; cursor: pointer;
+}
+button:hover { background: var(--ui-2); }
+button:active { transform: translateY(1px); }
+button.danger { color: var(--red); }
+button:disabled { opacity: 0.5; cursor: default; }
+:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+details summary { cursor: pointer; color: var(--tx-2); }
+.mem-body { white-space: pre-wrap; margin: 6px 0 0; color: var(--tx); font-size: 13px; }
+
+.toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); margin: 0; padding: 8px 14px; border-radius: 8px; background: var(--ui-2); color: var(--tx); font-size: 13px; opacity: 0; pointer-events: none; transition: opacity 0.15s; max-width: min(90vw, 640px); }
+.toast.show { opacity: 1; }
+.toast.err { color: var(--red); }
+
+dialog { width: min(96vw, 1000px); max-height: 86vh; padding: 0; background: var(--bg-2); color: var(--tx); border: 1px solid var(--ui-2); border-radius: 10px; }
+dialog::backdrop { background: rgb(0 0 0 / 0.5); }
+.log-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--ui); position: sticky; top: 0; background: var(--bg-2); }
+dialog pre { margin: 0; padding: 12px 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+@media (max-width: 640px) {
+  body { padding: 14px 12px 48px; }
+  th.opt, td.opt { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}

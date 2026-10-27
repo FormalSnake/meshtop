@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>meshtop</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="top">
+    <h1>meshtop <span id="here" class="muted"></span></h1>
+    <p id="meta" class="muted mono"></p>
+  </header>
+
+  <section aria-labelledby="hosts-h" class="hosts-wrap">
+    <h2 id="hosts-h" class="sr-only">Hosts</h2>
+    <div id="hosts" class="hosts" aria-live="polite"></div>
+  </section>
+
+  <nav class="tabs" aria-label="Sections">
+    <a href="#deliveries">Deliveries</a>
+    <a href="#jobs">Jobs</a>
+    <a href="#worktrees">Worktrees</a>
+    <a href="#services">Services</a>
+    <a href="#skills">Skills</a>
+    <a href="#memory">Memory</a>
+  </nav>
+
+  <main id="view" tabindex="-1"></main>
+
+  <p id="toast" class="toast" role="status" aria-live="polite"></p>
+
+  <dialog id="log">
+    <form method="dialog" class="log-head">
+      <h2 id="log-title"></h2>
+      <button>Close</button>
+    </form>
+    <pre id="log-body" class="mono"></pre>
+  </dialog>
+</body>
+</html>

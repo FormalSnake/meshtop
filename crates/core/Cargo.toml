@@ -1,0 +1,20 @@
+[package]
+name = "meshtop-core"
+description = "Collectors, host registry, skills, memory and job state shared by the meshtop CLI and web UI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+base64.workspace = true
+jiff.workspace = true
+libc = "0.2.191"
+netstat2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sysinfo.workspace = true
+toml.workspace = true
+ureq.workspace = true

@@ -1,11 +1,10 @@
 mod app;
-mod collect;
-mod config;
-mod model;
-mod source;
-mod topo;
+mod deliver;
+mod manage;
+mod serve;
 mod ui;
-mod usage;
+
+use meshtop_core::{collect, config, model, source, topo, usage};
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -41,14 +40,57 @@ enum Cmd {
     },
     /// Print one snapshot of this machine as pretty JSON.
     Snapshot,
-    /// Print the config path and the hosts it resolves to.
-    Hosts,
+    /// Print the config path and the hosts it resolves to. With a
+    /// subcommand, manage host roles and holds from the registry.
+    Hosts {
+        #[command(subcommand)]
+        cmd: Option<manage::HostsCmd>,
+    },
+    /// The shared skill registry and its install targets.
+    #[command(subcommand)]
+    Skills(manage::SkillsCmd),
+    /// Selective, scoped agent memory.
+    #[command(subcommand)]
+    Memory(manage::MemoryCmd),
+    /// Detached, recoverable long jobs (builds, tests, applies).
+    #[command(subcommand)]
+    Job(manage::JobCmd),
+    /// Status, logs and allowed restarts of this host's services.
+    #[command(subcommand)]
+    Services(manage::ServicesCmd),
+    /// Build now, install when the target is back: a delivery that waits
+    /// out a host that is off or booted into another OS.
+    #[command(subcommand)]
+    Deliver(deliver::DeliverCmd),
+    /// Linked worktrees: who owns them, what work they hold, and safe cleanup.
+    #[command(subcommand)]
+    Worktrees(manage::WorktreesCmd),
+    /// The web UI over the same state the CLI uses.
+    Serve(serve::ServeArgs),
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let config = config::load(cli.config)?;
-    match cli.command {
+    let code = match cli.command {
+        Some(Cmd::Hosts { cmd: Some(c) }) => manage::hosts_cmd(c)?,
+        Some(Cmd::Skills(c)) => manage::skills_cmd(c)?,
+        Some(Cmd::Memory(c)) => manage::memory_cmd(c)?,
+        Some(Cmd::Job(c)) => manage::job_cmd(c)?,
+        Some(Cmd::Services(c)) => manage::services_cmd(c)?,
+        Some(Cmd::Worktrees(c)) => manage::worktrees_cmd(c)?,
+        Some(Cmd::Deliver(c)) => deliver::deliver_cmd(c)?,
+        Some(Cmd::Serve(a)) => serve::run(a)?,
+        other => {
+            monitor(cli.config, other)?;
+            0
+        }
+    };
+    std::process::exit(code);
+}
+
+fn monitor(config: Option<std::path::PathBuf>, cmd: Option<Cmd>) -> Result<()> {
+    let config = config::load(config)?;
+    match cmd {
         Some(Cmd::Agent { interval }) => agent(config, interval),
         Some(Cmd::Snapshot) => {
             let mut c = Collector::new(config.activity);
@@ -56,7 +98,7 @@ fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&c.sample())?);
             Ok(())
         }
-        Some(Cmd::Hosts) => {
+        Some(Cmd::Hosts { .. }) => {
             let local = sysinfo::System::host_name().unwrap_or_default();
             println!("{}", config::path().display());
             for h in resolve_hosts(&config, &local) {
@@ -69,7 +111,7 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        None => tui(config),
+        _ => tui(config),
     }
 }
 

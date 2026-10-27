@@ -1,0 +1,18 @@
+[package]
+name = "meshtop"
+description = "Live resource usage and connections across your machines, in one terminal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+meshtop-core = { path = "../core" }
+anyhow.workspace = true
+clap.workspace = true
+jiff.workspace = true
+ratatui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sysinfo.workspace = true
+tiny_http = "0.12.0"
