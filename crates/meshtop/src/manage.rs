@@ -905,7 +905,11 @@ pub fn services_cmd(cmd: ServicesCmd) -> Result<i32> {
             for s in &st {
                 let pid = s.pid.map(|p| format!(" pid {p}")).unwrap_or_default();
                 let state = if s.running { "running" } else { "stopped" };
-                println!("{:<w$} {state}{pid}  last exit {}", s.name, s.last_exit.as_deref().unwrap_or("-"));
+                let at = s.at.as_deref().map(|a| format!(" on {a}")).unwrap_or_default();
+                println!("{:<w$} {state}{pid}{at}  last exit {}", s.name, s.last_exit.as_deref().unwrap_or("-"));
+                if let (false, Some(d)) = (s.running, &s.detail) {
+                    println!("{:<w$} {d}", "");
+                }
             }
             Ok(i32::from(st.iter().any(|s| !s.running)))
         }

@@ -188,8 +188,9 @@ const views = {
     const { host, services } = await api("services");
     return table([["Service"], ["State"], ["Last exit", "opt"], [""]],
       services.map((s) => h("tr", {},
-        h("td", { class: "mono" }, s.name, h("div", { class: "muted" }, s.unit)),
-        h("td", {}, state(s.running ? "running-ok" : "stopped"), s.pid ? h("span", { class: "muted mono" }, ` pid ${s.pid}`) : null),
+        h("td", { class: "mono" }, s.name, h("div", { class: "muted" }, s.at ? `${s.unit} on ${s.at}` : s.unit)),
+        h("td", {}, state(s.running ? "running-ok" : "stopped"), s.pid ? h("span", { class: "muted mono" }, ` pid ${s.pid}`) : null,
+          !s.running && s.detail ? h("div", { class: "muted" }, s.detail) : null),
         h("td", { class: "mono opt" }, s.last_exit || ""),
         h("td", { class: "act" },
           h("button", { onclick: () => logOf(`services/${s.name}/logs?lines=300`, s.name) }, "Log"),
@@ -248,9 +249,13 @@ let drawn = null, drawing = 0;
 
 async function draw() {
   const name = location.hash.slice(1) in views ? location.hash.slice(1) : "deliveries";
-  for (const a of document.querySelectorAll(".tabs a")) {
-    if (a.hash === "#" + name) a.setAttribute("aria-current", "page");
-    else a.removeAttribute("aria-current");
+  const nav = document.querySelector(".tabs");
+  for (const a of nav.querySelectorAll("a")) {
+    if (a.hash !== "#" + name) { a.removeAttribute("aria-current"); continue; }
+    a.setAttribute("aria-current", "page");
+    // Bring the tab into the scroller on a phone without scrolling the page.
+    const r = a.getBoundingClientRect(), n = nav.getBoundingClientRect();
+    if (r.left < n.left || r.right > n.right) nav.scrollBy({ left: r.left < n.left ? r.left - n.left : r.right - n.right });
   }
   const main = document.getElementById("view");
   const seq = ++drawing;

@@ -40,9 +40,12 @@
 * { box-sizing: border-box; }
 
 body {
+  --pad: 24px;
+  --edge-l: max(var(--pad), env(safe-area-inset-left, 0px));
+  --edge-r: max(var(--pad), env(safe-area-inset-right, 0px));
   margin: 0 auto;
   max-width: 1280px;
-  padding: 20px 24px 64px;
+  padding: 20px var(--edge-r) calc(64px + env(safe-area-inset-bottom, 0px)) var(--edge-l);
   background: var(--bg);
   color: var(--tx);
   font: 14px/1.45 var(--sans);
@@ -82,10 +85,33 @@ h2 { font-size: 15px; }
 .host .hold { color: var(--orange); font-size: 13px; margin: 0; }
 .host-actions { display: flex; gap: 6px; }
 
-.tabs { display: flex; gap: 2px; margin: 24px 0 12px; border-bottom: 1px solid var(--ui); overflow-x: auto; }
-.tabs a { padding: 8px 12px; color: var(--tx-2); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
-.tabs a:hover { color: var(--tx); }
-.tabs a[aria-current="page"] { color: var(--tx); border-bottom-color: var(--cyan); }
+/* The rule and the underline are inset shadows: a border pulled down with a
+   negative margin overflows the scroller and makes it scroll vertically. */
+.tabs {
+  display: flex;
+  gap: 2px;
+  margin: 24px 0 12px;
+  box-shadow: inset 0 -1px 0 var(--ui);
+  overflow: auto hidden;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
+.tabs a {
+  flex: none;
+  padding: 8px 12px;
+  color: var(--tx-2);
+  text-decoration: none;
+  white-space: nowrap;
+  scroll-snap-align: start;
+  -webkit-tap-highlight-color: transparent;
+}
+.tabs a:focus-visible { outline-offset: -2px; }
+.tabs a[aria-current="page"] { color: var(--tx); box-shadow: inset 0 -2px 0 var(--cyan); }
+@media (hover: hover) and (pointer: fine) {
+  .tabs a:hover { color: var(--tx); }
+}
 
 main:focus { outline: none; }
 .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 10px; }
@@ -130,7 +156,14 @@ dialog::backdrop { background: rgb(0 0 0 / 0.5); }
 dialog pre { margin: 0; padding: 12px 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 @media (max-width: 640px) {
-  body { padding: 14px 12px 48px; }
+  body { --pad: 12px; padding-top: 14px; padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px)); }
+  /* Full bleed, so a tab cut off at the edge shows there is more to swipe. */
+  .tabs {
+    margin-inline: calc(-1 * var(--edge-l)) calc(-1 * var(--edge-r));
+    padding-inline: var(--edge-l) var(--edge-r);
+    scroll-padding-inline: var(--edge-l) var(--edge-r);
+  }
+  .tabs a { padding-block: 10px; }
   th.opt, td.opt { display: none; }
 }
 

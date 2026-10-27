@@ -65,14 +65,28 @@ impl Default for MemoryViews {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Service {
     pub name: String,
-    /// launchd label or systemd user unit.
+    /// launchd label or systemd user unit, or the container name for docker.
     pub unit: String,
+    #[serde(default)]
+    pub kind: ServiceKind,
+    /// For docker: run `docker` on this ssh destination, for a box that is
+    /// not one of the mesh's hosts.
+    pub ssh: Option<String>,
     #[serde(default)]
     pub logs: Vec<String>,
     #[serde(default)]
     pub restart: bool,
     /// Only shown on this host (registry host name). Unset: everywhere.
     pub host: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ServiceKind {
+    /// launchd on macOS, systemd --user on Linux.
+    #[default]
+    Unit,
+    Docker,
 }
 
 #[derive(Clone, Debug)]

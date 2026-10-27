@@ -1,19 +1,22 @@
 //! Status, logs and (opt-in) restarts for the registry's `[[services]]` on
 //! the host running meshtop: launchd agents on macOS, systemd user units on
-//! Linux. Anything not listed in the registry is out of reach on purpose.
+//! Linux, and docker containers, locally or on an ssh destination. Anything
+//! not listed in the registry is out of reach on purpose.
 
-use std::process::Command;
+use std::process::{Command, Output};
 
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 
 use crate::paths;
-use crate::registry::{Registry, Service};
+use crate::registry::{Registry, Service, ServiceKind};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ServiceStatus {
     pub name: String,
     pub unit: String,
+    /// The ssh destination a docker service lives on.
+    pub at: Option<String>,
     pub running: bool,
     pub pid: Option<u32>,
     pub last_exit: Option<String>,
@@ -37,13 +40,30 @@ pub fn status(s: &Service) -> ServiceStatus {
     let mut st = ServiceStatus {
         name: s.name.clone(),
         unit: s.unit.clone(),
+        at: s.ssh.clone(),
         running: false,
         pid: None,
         last_exit: None,
         restart: s.restart,
         detail: None,
     };
-    if cfg!(target_os = "macos") {
+    if s.kind == ServiceKind::Docker {
+        let fmt = "{{.State.Status}}|{{.State.Pid}}|{{.State.ExitCode}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}";
+        match docker(s, &["inspect", "-f", fmt, &s.unit]) {
+            Ok(o) if o.status.success() => {
+                let text = String::from_utf8_lossy(&o.stdout);
+                let mut f = text.trim().split('|');
+                let state = f.next().unwrap_or_default();
+                st.running = state == "running";
+                st.pid = f.next().and_then(|p| p.parse().ok()).filter(|p| *p != 0);
+                st.last_exit = f.next().map(str::to_string);
+                let health = f.next().unwrap_or_default();
+                st.detail = Some(if health.is_empty() { state.to_string() } else { format!("{state}, {health}") });
+            }
+            Ok(o) => st.detail = Some(String::from_utf8_lossy(&o.stderr).trim().to_string()),
+            Err(e) => st.detail = Some(e.to_string()),
+        }
+    } else if cfg!(target_os = "macos") {
         let out = Command::new("launchctl").arg("print").arg(format!("gui/{}/{}", uid(), s.unit)).output();
         match out {
             Ok(o) if o.status.success() => {
@@ -91,6 +111,10 @@ pub fn status(s: &Service) -> ServiceStatus {
 pub fn logs(reg: &Registry, host: &str, name: &str, lines: usize) -> Result<String> {
     let s = find(reg, host, name)?;
     let lines = lines.clamp(1, 2000);
+    if s.kind == ServiceKind::Docker {
+        let o = docker(&s, &["logs", "--tail", &lines.to_string(), &s.unit])?;
+        return Ok(String::from_utf8_lossy(&o.stdout).into_owned() + &String::from_utf8_lossy(&o.stderr));
+    }
     if s.logs.is_empty() {
         if cfg!(target_os = "macos") {
             bail!("{name} has no log file configured");
@@ -114,7 +138,9 @@ pub fn restart(reg: &Registry, host: &str, name: &str) -> Result<ServiceStatus> 
     if !s.restart {
         bail!("{name} is not marked restart = true in registry.toml");
     }
-    let o = if cfg!(target_os = "macos") {
+    let o = if s.kind == ServiceKind::Docker {
+        docker(&s, &["restart", &s.unit])?
+    } else if cfg!(target_os = "macos") {
         Command::new("launchctl").args(["kickstart", "-k"]).arg(format!("gui/{}/{}", uid(), s.unit)).output()?
     } else {
         Command::new("systemctl").args(["--user", "restart", &s.unit]).output()?
@@ -124,4 +150,18 @@ pub fn restart(reg: &Registry, host: &str, name: &str) -> Result<ServiceStatus> 
     }
     std::thread::sleep(std::time::Duration::from_millis(500));
     Ok(status(&s))
+}
+
+/// Runs `docker` here, or on the service's ssh destination with every
+/// argument quoted for the remote shell.
+fn docker(s: &Service, args: &[&str]) -> std::io::Result<Output> {
+    let Some(dest) = &s.ssh else {
+        return Command::new("docker").args(args).output();
+    };
+    let quoted: Vec<String> = args.iter().map(|a| format!("'{}'", a.replace('\'', r"'\''"))).collect();
+    Command::new("ssh")
+        .args(["-T", "-o", "BatchMode=yes", "-o", "LogLevel=ERROR", "-o", "ConnectTimeout=5"])
+        .arg(dest)
+        .arg(format!("docker {}", quoted.join(" ")))
+        .output()
 }
