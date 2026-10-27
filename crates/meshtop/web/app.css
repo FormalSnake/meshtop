@@ -126,6 +126,7 @@ tr:hover td { background: var(--bg-2); }
 td.why { color: var(--tx-2); font-size: 13px; max-width: 44ch; }
 td.num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 td.act { white-space: nowrap; text-align: right; }
+td.act button + button { margin-inline-start: 6px; }
 
 .state { font: 12px var(--mono); }
 .state.succeeded, .state.done, .state.current, .state.removable, .state.running-ok { color: var(--green); }
@@ -165,6 +166,12 @@ dialog pre { margin: 0; padding: 12px 14px; white-space: pre-wrap; overflow-wrap
   }
   .tabs a { padding-block: 10px; }
   th.opt, td.opt { display: none; }
+  /* Stack the row actions and let unit names break, so a row fits the
+     phone instead of pushing its buttons past the edge. */
+  td .muted { overflow-wrap: anywhere; }
+  td.act { white-space: normal; }
+  td.act button { display: block; margin-inline-start: auto; padding: 6px 12px; }
+  td.act button + button { margin-block-start: 6px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

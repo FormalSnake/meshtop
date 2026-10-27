@@ -77,7 +77,7 @@ function table(head, rows, empty) {
       h("tbody", {}, rows)));
 }
 
-const state = (s) => h("span", { class: "state " + s }, word(s));
+const state = (s, label = word(s)) => h("span", { class: "state " + s }, label);
 
 // ---- hosts ---------------------------------------------------------------
 
@@ -189,7 +189,7 @@ const views = {
     return table([["Service"], ["State"], ["Last exit", "opt"], [""]],
       services.map((s) => h("tr", {},
         h("td", { class: "mono" }, s.name, h("div", { class: "muted" }, s.at ? `${s.unit} on ${s.at}` : s.unit)),
-        h("td", {}, state(s.running ? "running-ok" : "stopped"), s.pid ? h("span", { class: "muted mono" }, ` pid ${s.pid}`) : null,
+        h("td", {}, s.running ? state("running-ok", "running") : state("stopped"), s.pid ? h("span", { class: "muted mono" }, ` pid ${s.pid}`) : null,
           !s.running && s.detail ? h("div", { class: "muted" }, s.detail) : null),
         h("td", { class: "mono opt" }, s.last_exit || ""),
         h("td", { class: "act" },
