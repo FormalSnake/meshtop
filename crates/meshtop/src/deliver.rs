@@ -116,7 +116,7 @@ impl Real {
 }
 
 fn seen(s: &jobs::Status) -> JobSeen {
-    JobSeen::Present { state: s.state.clone(), code: s.outcome.as_ref().and_then(|o| o.code) }
+    JobSeen::Present { state: s.state.clone(), code: s.outcome.as_ref().and_then(|o| o.code), auth: s.auth.clone() }
 }
 
 fn local_seen(r: Result<jobs::Status>) -> Option<JobSeen> {
@@ -163,7 +163,7 @@ impl Ops for Real {
                 let t = step.as_secs().max(1).to_string();
                 self.seen_remote(self.remote(host, &["job", "wait", id, "--timeout", &t, "--json"], None, step + Duration::from_secs(30)))
             };
-            let running = matches!(s, Some(JobSeen::Present { state: jobs::State::Starting | jobs::State::Running, .. }));
+            let running = matches!(s, Some(JobSeen::Present { state: jobs::State::Starting | jobs::State::Running, auth: None, .. }));
             if !running || Instant::now() >= end || self.cancelled() {
                 return s;
             }

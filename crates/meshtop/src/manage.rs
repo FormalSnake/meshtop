@@ -616,7 +616,9 @@ pub enum JobCmd {
     },
     /// Wait for the end, up to `--timeout` seconds. Exit 0 succeeded,
     /// 1 failed/blocked/cancelled, 74 lost (outcome unknown), 75 still
-    /// running at the deadline, 76 the host could not be asked.
+    /// running at the deadline, 76 the host could not be asked, 77 needs
+    /// authorization: refused a password, key or permission, or silent
+    /// behind a macOS dialog (that job keeps running until cancelled).
     Wait {
         id: String,
         #[arg(long, default_value_t = 600)]
@@ -733,6 +735,10 @@ fn run_remote(host: &str, args: &[String], stdin: Option<String>, limit: Duratio
     let r = remote_call(host, args, stdin, limit)?;
     print!("{}", r.stdout);
     match r.code {
+        None if hosts::classify_ssh_error(&r.stderr) == hosts::Reach::AuthFailed => {
+            eprintln!("{host} refused the ssh login ({}); nothing ran there.", r.stderr.trim());
+            Ok(jobs::EXIT_AUTH)
+        }
         None => {
             eprintln!("could not reach {host} ({}); the job's state is unknown. Ask again with the same command.", r.stderr.trim());
             Ok(jobs::EXIT_TRANSPORT)
@@ -746,6 +752,7 @@ fn run_remote(host: &str, args: &[String], stdin: Option<String>, limit: Duratio
 
 fn state_code(s: &jobs::Status) -> i32 {
     match s.state {
+        _ if s.auth.is_some() => jobs::EXIT_AUTH,
         jobs::State::Succeeded => 0,
         jobs::State::Lost => jobs::EXIT_LOST,
         jobs::State::Starting | jobs::State::Running => jobs::EXIT_STILL_RUNNING,

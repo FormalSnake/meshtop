@@ -158,7 +158,8 @@ pub fn retry_install(id: &str) -> Result<Progress> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum JobSeen {
     Absent,
-    Present { state: State, code: Option<i32> },
+    /// `auth`: evidence the job needs an authorization it cannot get.
+    Present { state: State, code: Option<i32>, auth: Option<String> },
 }
 
 pub enum TargetSeen {
@@ -196,6 +197,14 @@ pub struct Tuning {
 impl Default for Tuning {
     fn default() -> Self {
         Self { slice: Duration::from_secs(60), retry: Duration::from_secs(30) }
+    }
+}
+
+fn ended(what: &str, id: &str, host: &str, state: &State, code: Option<i32>, auth: Option<String>) -> String {
+    let base = format!("{what} {id} on {host} ended {state:?} (exit {code:?})").to_lowercase();
+    match auth {
+        Some(a) => format!("{base}; needs authorization: {a}"),
+        None => base,
     }
 }
 
@@ -268,6 +277,12 @@ pub fn drive(intent: &Intent, mut p: Progress, ops: &dyn Ops, t: &Tuning) -> Res
                         }
                     }
                     Some(JobSeen::Absent) => bail!("{host} accepted {id} and then had no record of it"),
+                    Some(JobSeen::Present { state: State::Starting | State::Running, auth: Some(a), .. }) => {
+                        note(&mut p, format!("build {id} on {host} needs authorization: {a}"))?;
+                        if !ops.pause(t.retry.min(left)) {
+                            return Ok(p);
+                        }
+                    }
                     Some(JobSeen::Present { state: State::Starting | State::Running, .. }) => {
                         note(&mut p, format!("building on {host} ({id})"))?;
                         let _ = ops.wait_job(&host, &id, slice);
@@ -278,7 +293,7 @@ pub fn drive(intent: &Intent, mut p: Progress, ops: &dyn Ops, t: &Tuning) -> Res
                         set(&mut p, Phase::WaitingTarget, why)?;
                     }
                     Some(JobSeen::Present { state: State::Lost, .. }) => set(&mut p, Phase::Unknown, format!("build {id} on {host} has no result; check its log before starting again"))?,
-                    Some(JobSeen::Present { state, code }) => set(&mut p, Phase::Failed, format!("build {id} on {host} ended {state:?} (exit {code:?})").to_lowercase())?,
+                    Some(JobSeen::Present { state, code, auth }) => set(&mut p, Phase::Failed, ended("build", &id, &host, &state, code, auth))?,
                 }
             }
             Phase::WaitingTarget => {
@@ -331,6 +346,12 @@ pub fn drive(intent: &Intent, mut p: Progress, ops: &dyn Ops, t: &Tuning) -> Res
                         }
                     }
                     Some(JobSeen::Absent) => bail!("{host} accepted {id} and then had no record of it"),
+                    Some(JobSeen::Present { state: State::Starting | State::Running, auth: Some(a), .. }) => {
+                        note(&mut p, format!("install {id} on {host} needs authorization: {a}"))?;
+                        if !ops.pause(t.retry.min(left)) {
+                            return Ok(p);
+                        }
+                    }
                     Some(JobSeen::Present { state: State::Starting | State::Running, .. }) => {
                         note(&mut p, format!("installing from {host} ({id})"))?;
                         let _ = ops.wait_job(&host, &id, slice);
@@ -339,7 +360,7 @@ pub fn drive(intent: &Intent, mut p: Progress, ops: &dyn Ops, t: &Tuning) -> Res
                     Some(JobSeen::Present { state: State::Lost, .. }) => {
                         set(&mut p, Phase::Unknown, format!("install {id} on {host} has no result; check {} and its log, then `meshtop deliver resume {} --retry-install` if running it again is safe", intent.target, intent.id))?
                     }
-                    Some(JobSeen::Present { state, code }) => set(&mut p, Phase::Failed, format!("install {id} on {host} ended {state:?} (exit {code:?})").to_lowercase())?,
+                    Some(JobSeen::Present { state, code, auth }) => set(&mut p, Phase::Failed, ended("install", &id, &host, &state, code, auth))?,
                 }
             }
             Phase::Done | Phase::Failed | Phase::Unknown => {}
@@ -408,7 +429,7 @@ mod tests {
             }
             Some(match self.jobs.borrow().get(&(host.into(), id.into())) {
                 None => JobSeen::Absent,
-                Some((_, s)) => JobSeen::Present { state: s.clone(), code: None },
+                Some((_, s)) => JobSeen::Present { state: s.clone(), code: None, auth: None },
             })
         }
         fn start(&self, host: &str, spec: &Spec) -> Option<JobSeen> {

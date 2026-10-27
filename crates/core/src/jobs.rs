@@ -32,6 +32,31 @@ pub const EXIT_LOST: i32 = 74;
 pub const EXIT_STILL_RUNNING: i32 = 75;
 /// Exit code when the remote host could not be asked at all.
 pub const EXIT_TRANSPORT: i32 = 76;
+/// Exit code when the job was refused an authorization (a password, a key, a
+/// permission), or sits quiet behind a macOS dialog nobody can answer.
+pub const EXIT_AUTH: i32 = 77;
+
+/// Lines that mean a command was refused authorization rather than failing on
+/// its own. Only the tail of a failed job's log is searched.
+const AUTH_SIGNS: &[&str] = &[
+    "sudo: a password is required",
+    "sudo: a terminal is required",
+    "sudo: no tty present",
+    "is not in the sudoers file",
+    "Permission denied (publickey",
+    "Host key verification failed",
+    "terminal prompts disabled",
+    "could not read Username for",
+    "User interaction is not allowed",
+    "errAuthorizationDenied",
+    "The authorization was denied",
+    "Not authorized to send Apple events",
+    "Operation not permitted",
+];
+
+/// How long a running job must be silent before an open macOS authorization
+/// dialog is taken as what it waits on.
+const DIALOG_QUIET_MS: u64 = 60_000;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Spec {
@@ -112,6 +137,10 @@ pub struct Status {
     pub quiet_ms: Option<u64>,
     pub log_bytes: u64,
     pub detail: Option<String>,
+    /// Evidence that the job needs an authorization it cannot get: the log
+    /// line of a failed job, or the dialog a quiet one sits behind.
+    #[serde(default)]
+    pub auth: Option<String>,
 }
 
 impl Status {
@@ -320,6 +349,13 @@ pub fn supervise(id: &str) -> Result<()> {
     let log = OpenOptions::new().create(true).append(true).open(d.join("log"))?;
     let mut cmd = Command::new(&record.spec.cmd[0]);
     cmd.args(&record.spec.cmd[1..]).envs(&record.spec.env).stdin(Stdio::null()).stdout(log.try_clone()?).stderr(log);
+    // Nobody can answer a prompt here, so git and ssh should fail at once
+    // rather than wait on a terminal or an askpass window.
+    for (k, v) in [("GIT_TERMINAL_PROMPT", "0"), ("SSH_ASKPASS_REQUIRE", "never")] {
+        if std::env::var_os(k).is_none() && !record.spec.env.contains_key(k) {
+            cmd.env(k, v);
+        }
+    }
     if let Some(cwd) = &record.spec.cwd {
         cmd.current_dir(cwd);
     }
@@ -445,7 +481,46 @@ pub fn status(id: &str) -> Result<Status> {
         State::Running => modified_ms(&log).map(|m| paths::now_ms().saturating_sub(m)),
         _ => None,
     };
-    Ok(Status { id: id.into(), state, record, outcome, delivery, quiet_ms, log_bytes, detail })
+    let auth = match state {
+        State::Failed if outcome.as_ref().is_some_and(|o| o.error.is_none()) => auth_evidence(id),
+        State::Running if quiet_ms.is_some_and(|q| q >= DIALOG_QUIET_MS) => {
+            auth_dialog_since(record.started.unwrap_or(record.created) / 1000).map(|secs| {
+                format!("silent since SecurityAgent, which draws macOS authorization dialogs, started {secs}s ago; nothing answers it on a headless mac")
+            })
+        }
+        _ => None,
+    };
+    if let Some(a) = &auth
+        && detail.is_none() {
+            detail = Some(format!("needs authorization: {a}"));
+        }
+    Ok(Status { id: id.into(), state, record, outcome, delivery, quiet_ms, log_bytes, detail, auth })
+}
+
+/// The last line in a failed job's tail that shows a refused authorization.
+fn auth_evidence(id: &str) -> Option<String> {
+    let t = tail(id, 40).ok()?;
+    t.lines().rev().map(str::trim).find(|l| AUTH_SIGNS.iter().any(|s| l.contains(s))).map(String::from)
+}
+
+/// Seconds SecurityAgent has been up, when it started after `since` (epoch
+/// seconds). macOS launches it to draw authorization and keychain dialogs.
+#[cfg(target_os = "macos")]
+fn auth_dialog_since(since: u64) -> Option<u64> {
+    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
+    let now = paths::now_ms() / 1000;
+    sys.processes()
+        .values()
+        .filter(|p| p.name() == "SecurityAgent" && p.start_time() >= since)
+        .map(|p| now.saturating_sub(p.start_time()))
+        .max()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn auth_dialog_since(_since: u64) -> Option<u64> {
+    None
 }
 
 pub fn list() -> Vec<Status> {
@@ -480,7 +555,8 @@ pub fn wait(id: &str, timeout: Duration) -> Result<Status> {
     let deadline = Instant::now() + timeout;
     loop {
         let s = status(id)?;
-        if s.finished() || Instant::now() >= deadline {
+        // A job stuck behind a dialog keeps running; the caller decides.
+        if s.finished() || s.auth.is_some() || Instant::now() >= deadline {
             return Ok(s);
         }
         std::thread::sleep(Duration::from_millis(500));
@@ -567,6 +643,20 @@ mod tests {
             assert_eq!(s.state, State::Failed);
             assert_eq!(s.outcome.unwrap().code, Some(3));
             assert_eq!(tail("fast", 5).unwrap(), "built");
+        })
+    }
+
+    #[test]
+    fn refused_authorization_is_named_and_success_never_is() {
+        with_state(|| {
+            run(Spec { id: "sudo".into(), cmd: sh("echo building; echo 'sudo: a password is required' >&2; exit 1"), ..Default::default() }).join().unwrap().unwrap();
+            let s = wait("sudo", Duration::from_secs(1)).unwrap();
+            assert_eq!(s.state, State::Failed);
+            assert_eq!(s.auth.as_deref(), Some("sudo: a password is required"));
+            run(Spec { id: "plain".into(), cmd: sh("echo 'error: linker failed'; exit 1"), ..Default::default() }).join().unwrap().unwrap();
+            assert_eq!(wait("plain", Duration::from_secs(1)).unwrap().auth, None);
+            run(Spec { id: "ok".into(), cmd: sh("echo 'Operation not permitted, ignored'; exit 0"), ..Default::default() }).join().unwrap().unwrap();
+            assert_eq!(wait("ok", Duration::from_secs(1)).unwrap().auth, None);
         })
     }
 

@@ -155,12 +155,17 @@ Jobs are detached commands that survive the shell that started them:
 
 ```
 meshtop job start --id g815-switch --host g815 -- sudo -n nixos-rebuild switch --flake .#g815
-meshtop job wait g815-switch --timeout 1800   # 0 ok, 1 failed, 74 lost, 75 still running, 76 host unreachable
+meshtop job wait g815-switch --timeout 1800   # 0 ok, 1 failed, 74 lost, 75 still running, 76 host unreachable, 77 needs authorization
 meshtop job logs g815-switch
 ```
 
 Starting an id that exists reports the existing job, so retrying after a lost
 reply never runs the command twice.
+
+Jobs run without a terminal, so a prompt fails instead of waiting: git and
+ssh are told not to ask. A job that failed on a refused password, key or
+permission, or that sits silent while macOS shows an authorization dialog,
+says so in its status and `wait` exits 77. Nothing retries it on its own.
 
 A delivery is a build that waits for its target. It builds as soon as a
 builder is free, then installs when the target is back in the right OS,
